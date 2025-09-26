@@ -18,7 +18,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: shimat/opencvsharp/ubuntu22-dotnet6sdk-opencv4.7.0:20230114
+      image: ghcr.io/shimat/opencvsharp/ubuntu22-dotnet6sdk-opencv4.7.0:20230114
 
     steps:
 

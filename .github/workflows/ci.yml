@@ -1,0 +1,39 @@
+name: Build master
+
+on:
+  pull_request:
+    branches:
+      - 'master'
+  push:
+    branches:
+      - "master"
+      - "ci"
+
+env:
+  OPAMROOT: /home/opam/.opam
+  OPAMYES: true
+  OPAMCONFIRMLEVEL: unsafe-yes
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/shimat/opencvsharp/ubuntu22-dotnet6sdk-opencv4.7.0:20230114
+
+    steps:
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: look_around 
+        run: ls
+      
+      - name: build
+        run: dotnet build
+
+      - name: run_tests 
+        run: |
+          cd ./Tests
+          dotnet run

@@ -4,15 +4,25 @@ open Conv
 
 let (@@) = (<|)
 
-let eq_to_opencv (m: Mat) (kernel: Mat) =
+// let print_byte_matrix m =
+//     let indr = ind m
+//     for y in 0 .. m.Height - 1 do
+//         for x in 0 .. m.Width do
+//             printf "%d " @@ indr.get_Item(y,x)
+//         printfn ""
+//     printfn ""
+
+
+let eq_to_opencv (m: Mat) (kernel: Mat) mode =
     use dest1 = new Mat(m.Height, m.Width, m.Type())
     use dest2 = new Mat(m.Height, m.Width, m.Type())
 
-    conv m dest1 kernel
+    conv m dest1 kernel mode
     Cv2.Filter2D(m, dest2, -1, kernel, borderType = BorderTypes.Replicate)
 
     let indr1, indr2 = ind dest1, ind dest2
-
+    // print_byte_matrix dest1
+    // print_byte_matrix dest2
 
     Seq.fold (&&) true
     @@ seq {
@@ -57,8 +67,27 @@ type MyGenerators =
             override _.Generator = float_mat_gen
             override _.Shrinker _ = Seq.empty }
 
+for mode in [ Seql; ByPixel; ByRow; ByColumn; ByRect(UnLimited, UnLimited) ] do
+    FsCheck.Check.One(
+        FsCheck.Config.Quick.WithArbitrary([ typeof<MyGenerators> ]),
+        fun (m: Mat<byte>) (k: Mat<float32>) -> eq_to_opencv m k mode
+    )
 
 FsCheck.Check.One(
     FsCheck.Config.Quick.WithArbitrary([ typeof<MyGenerators> ]),
-    fun (m: Mat<byte>) (k: Mat<float32>) -> eq_to_opencv m k
+    fun (m: Mat<byte>) (k: Mat<float32>) (xS: uint16) ->
+        eq_to_opencv m k @@ ByRect(Limited @@ max 1 @@ int xS, UnLimited)
+)
+
+FsCheck.Check.One(
+    FsCheck.Config.Quick.WithArbitrary([ typeof<MyGenerators> ]),
+    fun (m: Mat<byte>) (k: Mat<float32>) (xS: uint16) ->
+        eq_to_opencv m k @@ ByRect(Limited @@ max 1 @@ int xS, UnLimited)
+)
+
+FsCheck.Check.One(
+    FsCheck.Config.Quick.WithArbitrary([ typeof<MyGenerators> ]),
+    fun (m: Mat<byte>) (k: Mat<float32>) (xS: uint16) (yS: uint16) ->
+        eq_to_opencv m k
+        @@ ByRect(Limited @@ max 1 @@ int xS, Limited @@ max 1 @@ int yS)
 )

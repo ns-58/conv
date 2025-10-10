@@ -1,88 +1,11 @@
 ﻿open System.IO
 open OpenCvSharp
 open Conv
-open System.Threading.Tasks.Dataflow
-
-let (>>) f a = (fun () -> a) f
-
-open System
-
-type cnfg =
-    { mutable srcdir: string
-      mutable outdir: string
-      mutable prefix: string
-      mutable max_readers: int option
-      mutable max_writers: int option
-      mutable max_conv_performers: int option
-      mutable max_queue_size: int option
-      mutable conv_mode: paral_method }
-
-let full_cycle_paral_conv cnfg kernel =
-
-    let load name =
-        let src = new Mat(name, ImreadModes.Grayscale)
-        (src, name)
-
-    let applyFilter (m: Mat, name) =
-        let dest = new Mat(m.Height, m.Width, m.Type())
-        conv m dest kernel cnfg.conv_mode
-        m.Dispose()
-        (dest, name)
-
-    let save (m: Mat, name: string) =
-        Cv2.ImWrite(sprintf "./%s/%s-%s" cnfg.outdir cnfg.prefix @@ Path.GetFileName name, m)
-        |> ignore
-
-        m.Dispose()
-
-    let opts bounded_queue p_deg =
-        ExecutionDataflowBlockOptions(
-            MaxDegreeOfParallelism = Option.defaultValue DataflowBlockOptions.Unbounded p_deg,
-            BoundedCapacity =
-                match cnfg.max_queue_size with
-                | Some n when bounded_queue -> n
-                | _ -> DataflowBlockOptions.Unbounded
-        )
-
-    let link_opts = DataflowLinkOptions(PropagateCompletion = true)
-
-
-    let loadBlock =
-        TransformBlock<string, Mat * string>(
-            load,
-            opts true cnfg.max_readers
-
-        )
-
-    let processBlock =
-        TransformBlock<Mat * string, Mat * string>(applyFilter, opts true cnfg.max_conv_performers)
-
-    let saveBlock = ActionBlock<Mat * string>(save, opts true cnfg.max_writers)
-
-    let waitingBlock = BufferBlock<string>()
-
-    use _ = waitingBlock.LinkTo(loadBlock, link_opts)
-    use _ = loadBlock.LinkTo(processBlock, link_opts)
-    use _ = processBlock.LinkTo(saveBlock, link_opts)
-    System.IO.Directory.CreateDirectory cnfg.outdir |> ignore
-
-    Directory.GetFiles(cnfg.srcdir, "*.jpg", SearchOption.TopDirectoryOnly)
-    |> Array.iter @@ fun name -> waitingBlock.Post name |> ignore
-
-    waitingBlock.Complete()
-
-    try
-        saveBlock.Completion.Wait()
-    with :? AggregateException as ex ->
-        ex.InnerExceptions
-        |> Seq.iter (fun e ->
-            match e.Message with
-            | "!_img.empty()" -> ()
-            | _ -> Printf.eprintfn "Error: %s" e.Message)
-
+open ReadConvWrite
+open Argu
 
 let cnfg =
-    { srcdir = "./"
+    { source = ([ "./" ], SearchOption.TopDirectoryOnly)
       outdir = "./Out"
       prefix = "Conv"
       max_readers = Some 1
@@ -91,11 +14,121 @@ let cnfg =
       max_queue_size = Some 4
       conv_mode = ByRow }
 
-[<EntryPoint>]
-let main _ =
+type conv_mode =
+    | Seql
+    | ByPixel
+    | ByRow
+    | ByColumn
+    | ByRect
 
-    let kernel = new Mat([| 3; 3 |], MatType.CV_32FC1, Scalar -1.)
-    ~~~ (ind_fl kernel).set_Item 1 1 @@ float32 8
+type CliArgument =
+    | [<AltCommandLine("-s")>] Source of pathes: string list
+    | [<AltCommandLine("-r")>] Recursive
+    | [<AltCommandLine("-k")>] Kernel of Kernels.kernel
+    | [<AltCommandLine("-o")>] Out_Dir of path: string
+    | [<AltCommandLine("-p")>] Prefix of str: string
+    | [<AltCommandLine("-m")>] Conv_Mode of conv_mode
+    | [<AltCommandLine("-rh")>] Rect_Height of num: int option
+    | [<AltCommandLine("-rw")>] Rect_Width of num: int option
+    | Max_Readers of num: int
+    | Max_Conv_Workers of num: int
+    | Max_Writers of num: int
+    | Max_Queue_size of num: int
+
+    interface IArgParserTemplate with
+        member s.Usage =
+            match s with
+            | Source _ -> "specify (list of) image/directory pathes (Default: ./ )"
+            | Kernel _ -> "specify kernel to be applied (Default:  id)"
+            | Recursive -> "search in nested directories too"
+            | Out_Dir _ -> "specify directory for output images (Default: ./Out )"
+            | Prefix _ -> "specify prefix for output image names (Default: Conv)"
+            | Conv_Mode _ -> "specify the rule for (inter-threading) data partition (Default: ByRow)"
+            | Rect_Height _ -> "specify rectangle height for ByRect partition (Default: 9). -1 stands for image height"
+            | Rect_Width _ -> "specify rectangle width for ByRect partition (Default: 9). -1 stands for image width"
+            | Max_Readers _ ->
+                "specify upper bound for image reading threads number (Default: 1). -1 stands for unbound"
+            | Max_Conv_Workers _ ->
+                "specify upper bound for image conv. threads number (Default: 4). -1 stands for unbound"
+            | Max_Writers _ ->
+                "specify upper bound for output image saving threads number (Default: -1). -1 stands for unbound"
+            | Max_Queue_size _ -> "specify upper bound for images in queue (Default: 4). -1 stands for unbound"
+
+
+[<EntryPoint>]
+let main args =
+    let parser =
+        ArgumentParser.Create<CliArgument>(
+            errorHandler =
+                ProcessExiter(
+                    colorizer =
+                        function
+                        | ErrorCode.HelpText -> None
+                        | _ -> Some System.ConsoleColor.Red
+                )
+        )
+
+    let args = parser.Parse args
+
+    let int_hndl def =
+        function
+        | n when n >= 0 -> Some n
+        | -1 -> None
+        | _ -> Some def
+
+    let rec_flag_hndl =
+        function
+        | true -> SearchOption.AllDirectories
+        | false -> SearchOption.TopDirectoryOnly
+
+
+    let mode_hndl def mode rect_width rect_height =
+        match mode with
+        | ByRect ->
+            let size_hndl =
+                function
+                | Some -1 -> UnLimited
+                | Some n when n >= 0 -> Limited n
+                | _ -> Limited def
+
+            paral_method.ByRect(size_hndl rect_width, size_hndl rect_height)
+
+        | Seql -> paral_method.Seql
+        | ByPixel -> paral_method.ByPixel
+        | ByRow -> paral_method.ByRow
+        | ByColumn -> paral_method.ByColumn
+
+
+    let cnfg =
+        { source = args.GetResult(Source, defaultValue = [ "./" ]), args.Contains Recursive |> rec_flag_hndl
+          outdir = args.GetResult(Out_Dir, defaultValue = "./Out")
+          prefix = args.GetResult(Prefix, defaultValue = "Conv")
+          max_readers =
+            int_hndl 1
+            @@ args.GetResult(Max_Readers, defaultValue = 1)
+          max_conv_performers =
+            int_hndl 4
+            @@ args.GetResult(Max_Conv_Workers, defaultValue = 4)
+          max_writers =
+            int_hndl (-1)
+            @@ args.GetResult(Max_Writers, defaultValue = -1)
+          max_queue_size =
+            int_hndl 4
+            @@ args.GetResult(Max_Queue_size, defaultValue = 4)
+          conv_mode =
+            mode_hndl
+                9
+                (args.GetResult(Conv_Mode, defaultValue = ByRow))
+                (args.GetResult(Rect_Width, defaultValue = None))
+                (args.GetResult(Rect_Height, defaultValue = None)) }
+
+
+    let kernel =
+        Mat.FromArray(
+            Kernels.to_2d_array
+            @@ args.GetResult(Kernel, defaultValue = Kernels.Id)
+        )
+
     full_cycle_paral_conv cnfg kernel
     kernel.Dispose()
     0

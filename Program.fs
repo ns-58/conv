@@ -1,18 +1,10 @@
-﻿open System.IO
+open System.IO
 open OpenCvSharp
 open Conv
 open ReadConvWrite
 open Argu
+open System
 
-let cnfg =
-    { source = ([ "./" ], SearchOption.TopDirectoryOnly)
-      outdir = "./Out"
-      prefix = "Conv"
-      max_readers = Some 1
-      max_writers = None
-      max_conv_performers = Some 4
-      max_queue_size = Some 4
-      conv_mode = ByRow }
 
 type conv_mode =
     | Seql
@@ -38,7 +30,7 @@ type CliArgument =
     interface IArgParserTemplate with
         member s.Usage =
             match s with
-            | Source _ -> "specify (list of) image/directory pathes (Default: ./ )"
+            | Source _ -> "specify (list of) image/directory absolute pathes (Default: ./ )"
             | Kernel _ -> "specify kernel to be applied (Default:  id)"
             | Recursive -> "search in nested directories too"
             | Out_Dir _ -> "specify directory for output images (Default: ./Out )"
@@ -64,11 +56,12 @@ let main args =
                     colorizer =
                         function
                         | ErrorCode.HelpText -> None
-                        | _ -> Some System.ConsoleColor.Red
+                        | _ -> Some ConsoleColor.Red
                 )
         )
 
     let args = parser.Parse args
+
 
     let int_hndl def =
         function
@@ -103,18 +96,10 @@ let main args =
         { source = args.GetResult(Source, defaultValue = [ "./" ]), args.Contains Recursive |> rec_flag_hndl
           outdir = args.GetResult(Out_Dir, defaultValue = "./Out")
           prefix = args.GetResult(Prefix, defaultValue = "Conv")
-          max_readers =
-            int_hndl 1
-            @@ args.GetResult(Max_Readers, defaultValue = 1)
-          max_conv_performers =
-            int_hndl 4
-            @@ args.GetResult(Max_Conv_Workers, defaultValue = 4)
-          max_writers =
-            int_hndl (-1)
-            @@ args.GetResult(Max_Writers, defaultValue = -1)
-          max_queue_size =
-            int_hndl 4
-            @@ args.GetResult(Max_Queue_size, defaultValue = 4)
+          max_readers = int_hndl 1 @@ args.GetResult(Max_Readers, defaultValue = 1)
+          max_conv_performers = int_hndl 4 @@ args.GetResult(Max_Conv_Workers, defaultValue = 4)
+          max_writers = int_hndl (-1) @@ args.GetResult(Max_Writers, defaultValue = -1)
+          max_queue_size = int_hndl 4 @@ args.GetResult(Max_Queue_size, defaultValue = 4)
           conv_mode =
             mode_hndl
                 9
@@ -124,10 +109,7 @@ let main args =
 
 
     let kernel =
-        Mat.FromArray(
-            Kernels.to_2d_array
-            @@ args.GetResult(Kernel, defaultValue = Kernels.Id)
-        )
+        Mat.FromArray(Kernels.to_2d_array @@ args.GetResult(Kernel, defaultValue = Kernels.Id))
 
     full_cycle_paral_conv cnfg kernel
     kernel.Dispose()

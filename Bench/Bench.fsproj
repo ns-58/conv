@@ -6,7 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="Partition.fs" />
+    <Compile Include="Bench.fs" />
   </ItemGroup>
 
   <ItemGroup>

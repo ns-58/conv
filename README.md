@@ -113,7 +113,7 @@ input: 99 650x650 images
 | R1CubseqlWubQ16 | 27.83 s | 0.187 s | 0.175 s | 27.91 s |
 | R1C2parWubQ2    | 40.61 s | 0.439 s | 0.411 s | 40.66 s | 
 
-where Rn --- n readers, Cn --- n convolutions, Wn --- n writers, Qn --- queue with size n,  ub --- unbound  
+where Rn --- n readers, Cn\<mode\> --- n convolutions using partition mode \<mode\>, Wn --- n writers, Qn --- queue with size n,  ub --- unbound  
 
 Наблюдения и итоги:
   одно чтение и одна запись способны "обслуживать" несколько сверток;  
